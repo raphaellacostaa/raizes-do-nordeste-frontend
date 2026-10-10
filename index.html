@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#193d34">
+  <meta name="description" content="Conheça o cardápio regional da Raízes do Nordeste. Peça com praticidade, acompanhe sua retirada e descubra benefícios do Clube Raízes.">
+  <title>Raízes do Nordeste | Tradição à mesa</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body class="channel-web">
+  <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
+  <header class="site-header">
+    <a class="brand" href="#inicio" data-view="menu" aria-label="Raízes do Nordeste, página inicial">
+      <span class="brand-mark" aria-hidden="true"><img src="assets/logo.svg" alt=""></span>
+      <span class="brand-copy"><strong>raizes<span>.</span></strong><small>do nordeste</small></span>
+    </a>
+    <div class="header-unit">
+      <label for="unit-select">Você está pedindo em</label>
+      <select id="unit-select" aria-label="Escolher unidade">
+        <option value="recife">Recife Antigo</option>
+        <option value="olinda">Olinda · Bairro Novo</option>
+        <option value="joao-pessoa">João Pessoa · Centro</option>
+      </select>
+    </div>
+    <nav class="main-nav" aria-label="Navegação principal">
+      <button class="nav-link is-active" type="button" data-view="menu">Cardápio</button>
+      <button class="nav-link" type="button" data-view="orders">Meus pedidos</button>
+      <button class="nav-link" type="button" data-view="rewards">Fidelidade <span class="nav-points" id="nav-points">0 pts</span></button>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-button account-button" type="button" id="account-button" aria-label="Abrir minha conta"><span aria-hidden="true">♙</span><span class="account-label" id="account-label">Entrar</span></button>
+      <button class="cart-pill" type="button" id="jump-cart"><span aria-hidden="true">♧</span> Sacola <b id="cart-count">0</b></button>
+    </div>
+  </header>
+
+  <div class="channel-bar">
+    <div class="channel-inner">
+      <span class="channel-hint">Experiência de demonstração</span>
+      <div class="channel-switch" role="group" aria-label="Selecionar canal de atendimento">
+        <button type="button" class="channel-option is-selected" data-channel="web">Web</button>
+        <button type="button" class="channel-option" data-channel="app">App</button>
+        <button type="button" class="channel-option" data-channel="totem">Totem</button>
+      </div>
+      <span class="mock-badge"><span aria-hidden="true">●</span> ambiente simulado</span>
+    </div>
+  </div>
+
+  <main id="main-content" tabindex="-1"></main>
+
+  <footer class="site-footer">
+    <div class="footer-brand"><img src="assets/logo.svg" alt="" width="28" height="28"><strong>Raízes do Nordeste</strong></div>
+    <p>Comida com memória, cuidado em cada pedido.</p>
+    <div class="footer-links"><button type="button" id="privacy-footer">Privacidade e dados</button><span>•</span><span>Projeto acadêmico · dados fictícios</span></div>
+  </footer>
+
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <div id="modal-root"></div>
+
+  <section id="consent-banner" class="consent-banner" aria-label="Preferências de privacidade" hidden>
+    <div class="consent-copy"><strong>Sua privacidade importa.</strong><p>Usamos apenas o necessário para simular seu pedido. Personalização e campanhas são opcionais.</p></div>
+    <div class="consent-actions"><button type="button" class="button button-quiet" id="customize-consent">Personalizar</button><button type="button" class="button button-primary" id="accept-essential">Continuar só com o necessário</button></div>
+  </section>
+</body>
+</html>
