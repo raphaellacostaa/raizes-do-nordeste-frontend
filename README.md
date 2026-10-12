@@ -101,7 +101,7 @@ docs/                       Fontes dos diagramas da documentação
 
 ## Autoria
 
-**Raphaella Patrícia Monteiro Costa** · RU 4577464
-Análise e Desenvolvimento de Sistemas · UNINTER · Polo Rio de Janeiro (Penha)
+**Raphaella Patrícia Monteiro Costa** 
+Análise e Desenvolvimento de Sistemas 
 Disciplina: Projeto Multidisciplinar – Trilha Front-End
-Professor: Esp. Giuliano Lanes de Almeida · 2026
+2026
