@@ -313,3 +313,26 @@ body{background:var(--cream);color:var(--ink);font-size:14px;line-height:1.6;let
  .mock-badge{display:none}
 }
 @media(prefers-reduced-motion:reduce){.hero-photo,.product-photo{transition:none!important}}
+
+/* ===== Acessibilidade: alvos de toque e novos componentes ===== */
+.add-button,.quantity-control button,.close-modal,.category-chip,.nav-link,.channel-option,.cart-pill,.icon-button,.payment-method,.footer-links button,.link-button{min-width:44px;min-height:44px}
+.add-button{width:44px;height:44px;flex:0 0 44px}
+.close-modal{width:44px;height:44px}
+.privacy-option input,.check-row input,.service-mode input{width:24px;height:24px;min-width:24px}
+.header-unit select,.search-wrap input,.field input{min-height:44px}
+/* Totem: alvos de toque >= 68 px */
+.channel-totem .button,.channel-totem .category-chip,.channel-totem .nav-link,.channel-totem .cart-pill,.channel-totem .icon-button,.channel-totem .payment-method,.channel-totem .close-modal,.channel-totem .quantity-control button,.channel-totem .add-button,.channel-totem .footer-links button{min-width:68px;min-height:68px}
+.channel-totem .add-button{width:68px;height:68px;flex-basis:68px}
+.channel-totem .header-unit select,.channel-totem .search-wrap input,.channel-totem .field input{min-height:68px}
+/* Promoção, modo de atendimento e senha */
+.promo-form{display:grid;gap:6px;margin-top:6px}.promo-form label{font-size:11px;color:var(--forest);font-weight:700}.promo-row{display:flex;gap:8px}.promo-row input{flex:1;min-width:0;border:1px solid #dcd5c8;border-radius:10px;padding:10px 12px;background:#fff;text-transform:uppercase}
+.service-mode{border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin:6px 0 0;display:flex;gap:16px;flex-wrap:wrap}.service-mode legend{font-size:11px;font-weight:700;color:var(--forest);padding:0 4px}.service-mode label{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink)}
+.link-button{border:0;background:transparent;color:var(--orange);text-decoration:underline;font-size:11px;padding:0 4px}
+.promo-applied strong{color:var(--success)}.promo-pending span{color:#8a6a2a}
+.ticket{background:#f3e6d0;color:#77502d;border-radius:99px;padding:5px 10px;font-size:10px;font-weight:700}
+.payment-result.pending{background:#fbf1d9;color:#7a5a16}
+.form-error{line-height:1.4}
+/* Direitos do titular (LGPD) */
+.rights{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}.rights h3{font-size:13px;color:var(--forest);margin:0 0 4px}.rights-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.rights-actions .button{flex:1 1 150px}
+.data-preview{max-height:180px;overflow:auto;background:#f3eee4;border-radius:10px;padding:10px;font-size:10px;white-space:pre-wrap;word-break:break-word}
+.consent-history{margin:10px 0 0;padding-left:18px;font-size:11px;color:var(--muted)}

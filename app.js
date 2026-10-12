@@ -30,7 +30,8 @@ const initialState = {
   unit: 'recife', channel: 'web', view: 'menu', category: 'Todos', search: '',
   cart: [], customer: null, orders: [], points: 120,
   consent: { essential: true, analytics: false, marketing: false, saved: false },
-  redeemed: [], selectedPayment: 'pix'
+  redeemed: [], selectedPayment: 'pix',
+  consentHistory: [], promo: '', pendingPayment: null, serviceMode: 'pickup', orderSeq: 100
 };
 let state = loadState();
 let toastCounter = 0;
@@ -44,7 +45,7 @@ function loadState() {
 }
 function persist() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ unit: state.unit, channel: state.channel, view: state.view, cart: state.cart, customer: state.customer, orders: state.orders, points: state.points, consent: state.consent, redeemed: state.redeemed, selectedPayment: state.selectedPayment }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ unit: state.unit, channel: state.channel, view: state.view, cart: state.cart, customer: state.customer, orders: state.orders, points: state.points, consent: state.consent, redeemed: state.redeemed, selectedPayment: state.selectedPayment, consentHistory: state.consentHistory, promo: state.promo, pendingPayment: state.pendingPayment, serviceMode: state.serviceMode, orderSeq: state.orderSeq }));
   } catch (error) { /* The demo remains usable when browser storage is unavailable. */ }
 }
 function money(value) { return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
@@ -52,6 +53,67 @@ function escapeHTML(value) { return String(value).replace(/[&<>"']/g, ch => ({ '
 function productById(id) { return products.find(item => item.id === id); }
 function cartQuantity() { return state.cart.reduce((sum, row) => sum + row.qty, 0); }
 function cartSubtotal() { return state.cart.reduce((sum, row) => { const product = productById(row.id); return sum + (product ? product.price * row.qty : 0); }, 0); }
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const PROMO = { code: 'RAIZES5', min: 30, discount: 5 };
+const IDLE_MS = 45000;
+let idleTimer = null;
+let paymentLock = false;
+let lastFocus = null;
+function serviceLabel() { return state.serviceMode === 'dinein' ? 'Consumo no local' : 'Retirada'; }
+function promoDiscount() { return state.promo === PROMO.code && cartSubtotal() >= PROMO.min ? PROMO.discount : 0; }
+function cartTotal() { return Math.max(0, cartSubtotal() - promoDiscount()); }
+function applyPromo(raw) {
+  const code = String(raw || '').trim().toUpperCase();
+  if (!code) { notify('Informe um código', 'Digite o código promocional.', 'error'); return; }
+  if (code !== PROMO.code) { notify('Código inválido', 'Confira o código e tente novamente.', 'error'); return; }
+  if (cartSubtotal() < PROMO.min) { notify('Pedido mínimo não atingido', `${PROMO.code} exige pedido de ${money(PROMO.min)}.`, 'error'); return; }
+  state.promo = PROMO.code; persist(); render(); notify('Código aplicado', `${PROMO.code}: − ${money(PROMO.discount)}.`);
+}
+function logConsent(origin) {
+  state.consentHistory.push({ at: new Date().toISOString(), origin, analytics: !!state.consent.analytics, marketing: !!state.consent.marketing });
+}
+function resetIdleTimer() {
+  window.clearTimeout(idleTimer);
+  if (state.channel !== 'totem') return;
+  idleTimer = window.setTimeout(endTotemSession, IDLE_MS);
+}
+function endTotemSession() {
+  if (state.channel !== 'totem') return;
+  state.cart = []; state.customer = null; state.promo = ''; state.pendingPayment = null; state.serviceMode = 'pickup';
+  state.view = 'menu'; state.category = 'Todos'; state.search = '';
+  closeModal(); persist(); render();
+  notify('Sessão encerrada', 'Por inatividade (45 s), a sacola e a identificação foram apagadas.');
+}
+function exportData() {
+  return { exportadoEm: new Date().toISOString(), aviso: 'Dados fictícios guardados apenas neste navegador.', perfil: state.customer, preferencias: { metricas: state.consent.analytics, campanhas: state.consent.marketing }, historicoConsentimento: state.consentHistory, pontos: state.points, resgates: state.redeemed, pedidos: state.orders };
+}
+function rightsBlock() {
+  return `<section class="rights" aria-labelledby="rights-title"><h3 id="rights-title">Seus direitos</h3><div class="rights-actions"><button type="button" class="button button-quiet" id="download-data">Ver/baixar meus dados</button><button type="button" class="button button-quiet" id="show-history">Histórico de consentimentos</button><button type="button" class="button button-line" id="delete-data">Excluir meus dados</button></div><div id="rights-output" aria-live="polite"></div></section>`;
+}
+function bindRights() {
+  const out = document.getElementById('rights-output');
+  document.getElementById('download-data').addEventListener('click', () => {
+    const json = JSON.stringify(exportData(), null, 2);
+    out.innerHTML = '<pre class="data-preview" tabindex="0"></pre>';
+    out.querySelector('pre').textContent = json;
+    try { const url = URL.createObjectURL(new Blob([json], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = 'meus-dados-raizes.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); } catch (error) { /* a visualização acima continua disponível */ }
+    notify('Dados exportados', 'Arquivo gerado apenas neste navegador.');
+  });
+  document.getElementById('show-history').addEventListener('click', () => {
+    const items = state.consentHistory.slice().reverse().map(h => `<li>${escapeHTML(new Date(h.at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }))} · ${escapeHTML(h.origin)} · métricas: ${h.analytics ? 'sim' : 'não'} · campanhas: ${h.marketing ? 'sim' : 'não'}</li>`).join('');
+    out.innerHTML = items ? `<ul class="consent-history">${items}</ul>` : '<p>Nenhuma escolha registrada ainda.</p>';
+  });
+  document.getElementById('delete-data').addEventListener('click', () => {
+    out.innerHTML = '<p><strong>Esta ação apaga perfil, pedidos, pontos e preferências deste navegador.</strong></p><div class="modal-actions"><button type="button" class="button button-primary" id="confirm-delete">Confirmar exclusão</button></div>';
+    document.getElementById('confirm-delete').addEventListener('click', deleteAllData);
+  });
+}
+function deleteAllData() {
+  try { localStorage.removeItem(STORE_KEY); } catch (error) { /* sem armazenamento */ }
+  state = structuredClone(initialState); paymentLock = false;
+  closeModal(); render();
+  notify('Dados excluídos', 'Perfil, pedidos, pontos e preferências foram apagados deste navegador.');
+}
 function setView(view) { state.view = view; state.category = 'Todos'; state.search = ''; persist(); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function notify(title, message = '', type = 'success') {
   const region = document.getElementById('toast-region');
@@ -64,12 +126,17 @@ function notify(title, message = '', type = 'success') {
 }
 function showModal(title, kicker, body, options = {}) {
   const root = document.getElementById('modal-root');
+  if (!root.querySelector('.modal')) lastFocus = document.activeElement;
   root.innerHTML = `<div class="modal-backdrop" data-backdrop><section class="modal ${options.wide ? 'modal-wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-header"><div><span class="modal-kicker">${escapeHTML(kicker)}</span><h2 id="modal-title">${escapeHTML(title)}</h2></div><button class="close-modal" type="button" aria-label="Fechar janela" data-close-modal>×</button></header><div class="modal-body">${body}</div></section></div>`;
   root.querySelector('[data-close-modal]').focus();
   root.querySelector('[data-close-modal]').addEventListener('click', closeModal);
   root.querySelector('[data-backdrop]').addEventListener('click', event => { if (event.target === event.currentTarget) closeModal(); });
 }
-function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+function closeModal() {
+  document.getElementById('modal-root').innerHTML = '';
+  if (lastFocus && document.contains(lastFocus) && typeof lastFocus.focus === 'function') lastFocus.focus();
+  lastFocus = null;
+}
 function updateHeader() {
   document.getElementById('unit-select').value = state.unit;
   document.getElementById('account-label').textContent = state.customer ? state.customer.name.split(' ')[0] : 'Entrar';
@@ -105,12 +172,15 @@ function renderMenu() {
 }
 function renderCartPanel() {
   const rows = state.cart.map(row => { const product = productById(row.id); if (!product) return ''; return `<div class="cart-item"><div><h4>${escapeHTML(product.name)}</h4><small>${money(product.price)} por unidade</small><div class="quantity-control"><button type="button" data-qty="${product.id}" data-change="-1" aria-label="Remover uma unidade de ${escapeHTML(product.name)}">−</button><span>${row.qty}</span><button type="button" data-qty="${product.id}" data-change="1" aria-label="Adicionar uma unidade de ${escapeHTML(product.name)}">+</button></div></div><span class="line-price">${money(product.price * row.qty)}</span></div>`; }).join('');
-  const subtotal = cartSubtotal();
-  return `<aside class="cart-panel" id="cart-panel" aria-labelledby="cart-title"><div class="cart-heading"><h2 id="cart-title">Sua sacola</h2><span class="cart-counter">${cartQuantity()} ${cartQuantity() === 1 ? 'item' : 'itens'}</span></div>${rows ? `<div class="cart-items">${rows}</div><div class="cart-total"><div class="total-row"><span>Subtotal</span><strong>${money(subtotal)}</strong></div><div class="total-row"><span>Retirada na unidade</span><strong>Grátis</strong></div><div class="total-row grand"><span>Total</span><strong>${money(subtotal)}</strong></div><button class="button button-primary" type="button" id="checkout-button">Continuar pedido <span aria-hidden="true">→</span></button></div>` : `<div class="cart-empty"><span aria-hidden="true">🛍️</span><strong>Sua próxima delícia começa aqui.</strong><p>Adicione seus favoritos para montar o pedido.</p></div>`}<p class="cart-footnote">Pagamento demonstrativo. Nenhuma cobrança real será feita.</p><div class="side-promo"><span aria-hidden="true">✦</span><div><strong>Clube Raízes</strong><p>Você tem ${state.points} pontos disponíveis para trocar por benefícios.</p></div></div></aside>`;
+  const subtotal = cartSubtotal(); const discount = promoDiscount(); const total = cartTotal();
+  const promoRow = state.promo ? (discount ? `<div class="total-row promo-applied"><span>Promoção ${escapeHTML(state.promo)} <button type="button" class="link-button" data-remove-promo>remover</button></span><strong>− ${money(discount)}</strong></div>` : `<div class="total-row promo-pending"><span>${escapeHTML(state.promo)} vale a partir de ${money(PROMO.min)} <button type="button" class="link-button" data-remove-promo>remover</button></span><strong>—</strong></div>`) : '';
+  const serviceBlock = `<fieldset class="service-mode"><legend>Como vai ser?</legend><label><input type="radio" name="service" value="pickup" ${state.serviceMode !== 'dinein' ? 'checked' : ''}> Retirada</label><label><input type="radio" name="service" value="dinein" ${state.serviceMode === 'dinein' ? 'checked' : ''}> Consumir no local</label></fieldset>`;
+  const promoForm = `<form class="promo-form" id="promo-form"><label for="promo-code">Código promocional</label><div class="promo-row"><input id="promo-code" name="code" autocomplete="off" maxlength="20" placeholder="Ex.: RAIZES5"><button type="submit" class="button button-quiet button-small">Aplicar</button></div></form>`;
+  return `<aside class="cart-panel" id="cart-panel" aria-labelledby="cart-title"><div class="cart-heading"><h2 id="cart-title">Sua sacola</h2><span class="cart-counter">${cartQuantity()} ${cartQuantity() === 1 ? 'item' : 'itens'}</span></div>${rows ? `<div class="cart-items">${rows}</div><div class="cart-total"><div class="total-row"><span>Subtotal</span><strong>${money(subtotal)}</strong></div>${promoRow}<div class="total-row"><span>${state.serviceMode === 'dinein' ? 'Consumo no local' : 'Retirada na unidade'}</span><strong>Grátis</strong></div><div class="total-row grand"><span>Total</span><strong>${money(total)}</strong></div>${serviceBlock}${promoForm}<button class="button button-primary" type="button" id="checkout-button">Continuar pedido <span aria-hidden="true">→</span></button></div>` : `<div class="cart-empty"><span aria-hidden="true">🛍️</span><strong>Sua próxima delícia começa aqui.</strong><p>Adicione seus favoritos para montar o pedido.</p></div>`}<p class="cart-footnote">Pagamento demonstrativo. Nenhuma cobrança real será feita.</p><div class="side-promo"><span aria-hidden="true">✦</span><div><strong>Clube Raízes</strong><p>Você tem ${state.points} pontos disponíveis para trocar por benefícios.</p></div></div></aside>`;
 }
 function renderOrders() {
   const orders = state.orders;
-  const rows = orders.map((order, index) => { const stage = statuses.indexOf(order.status); return `<article class="order-card"><div><div class="order-top"><h3>Pedido #${escapeHTML(order.id)}</h3><span class="status-pill">${escapeHTML(order.status)}</span></div><p>${escapeHTML(order.unitName)} · ${escapeHTML(order.date)} · ${escapeHTML(order.paymentLabel)}</p><div class="order-items-text">${escapeHTML(order.items.map(item => `${item.qty}× ${item.name}`).join(' · '))}</div><div class="progress-line" aria-label="Etapa ${stage + 1} de 4">${statuses.map((status, i) => `<span class="${i <= stage ? 'done' : ''}" title="${status}"></span>`).join('')}</div></div><div><div class="order-price">${money(order.total)}</div><button class="button button-line button-small" style="margin-top:12px" type="button" data-advance-order="${order.id}" ${stage >= 3 ? 'disabled' : ''}>${stage >= 3 ? 'Pedido retirado' : 'Avançar status (demo)'}</button></div></article>`; }).join('');
+  const rows = orders.map((order, index) => { const stage = statuses.indexOf(order.status); return `<article class="order-card"><div><div class="order-top"><h3>Pedido #${escapeHTML(order.id)}</h3><span class="status-pill">${escapeHTML(order.status)}</span>${order.ticket ? `<span class="ticket">Senha ${escapeHTML(order.ticket)}</span>` : ''}</div><p>${escapeHTML(order.unitName)} · ${escapeHTML(order.serviceLabel || 'Retirada')} · ${escapeHTML(order.date)} · ${escapeHTML(order.paymentLabel)}</p><div class="order-items-text">${escapeHTML(order.items.map(item => `${item.qty}× ${item.name}`).join(' · '))}</div><div class="progress-line" aria-label="Etapa ${stage + 1} de 4">${statuses.map((status, i) => `<span class="${i <= stage ? 'done' : ''}" title="${status}"></span>`).join('')}</div></div><div><div class="order-price">${money(order.total)}</div><button class="button button-line button-small" style="margin-top:12px" type="button" data-advance-order="${order.id}" ${stage >= 3 ? 'disabled' : ''}>${stage >= 3 ? 'Pedido retirado' : 'Avançar status (demo)'}</button></div></article>`; }).join('');
   return `<div class="page-shell"><header class="content-heading"><div><span class="eyebrow">Sua jornada</span><h1>Meus pedidos</h1><p>Acompanhe cada etapa até a retirada na unidade selecionada.</p></div><button class="button button-forest" type="button" data-view="menu">+ Novo pedido</button></header>${orders.length ? `<div class="orders-stack">${rows}</div><div class="notice">Os status são fictícios e servem apenas para demonstrar a interface. Em produção, viriam do sistema de pedidos da unidade.</div>` : `<div class="empty-state"><span aria-hidden="true">🧾</span><h3>Ainda não há pedidos por aqui</h3><p>Quando você concluir um pedido de demonstração, poderá acompanhar o status nesta área.</p><button class="button button-primary" type="button" data-view="menu">Ver cardápio</button></div>`}</div>`;
 }
 function renderRewards() {
@@ -118,6 +188,7 @@ function renderRewards() {
   return `<div class="page-shell"><header class="content-heading"><div><span class="eyebrow">Clube Raízes</span><h1>Fidelidade com sabor</h1><p>Seu carinho pela nossa cozinha vira pontos e pequenos benefícios.</p></div><button class="button button-line" type="button" id="privacy-from-rewards">Preferências de dados</button></header><section class="rewards-hero"><div><span class="eyebrow">Saldo de demonstração</span><h2>O bom de voltar é ser lembrado.</h2><p>Ganhe 1 ponto por real em pedidos aprovados. A pontuação e os resgates deste protótipo são locais e fictícios.</p></div><div class="points-big"><strong>${state.points}</strong><span>pontos disponíveis</span></div></section><div class="rewards-grid">${cards}</div><div class="notice"><strong>Privacidade em primeiro lugar.</strong> Campanhas personalizadas são opcionais. Dados de perfil não são usados para segmentação neste protótipo; preferências podem ser alteradas no painel de privacidade.</div></div>`;
 }
 function addToCart(id) {
+  if (state.pendingPayment) { notify('Pagamento em análise', 'Consulte o status do pagamento antes de alterar a sacola.', 'error'); return; }
   const product = productById(id);
   if (!product || !product.units.includes(state.unit)) { notify('Item indisponível', 'Escolha outra unidade para continuar.', 'error'); return; }
   const existing = state.cart.find(row => row.id === id);
@@ -125,6 +196,7 @@ function addToCart(id) {
   persist(); render(); notify('Adicionado à sacola', product.name);
 }
 function changeQuantity(id, change) {
+  if (state.pendingPayment) { notify('Pagamento em análise', 'Consulte o status do pagamento antes de alterar a sacola.', 'error'); return; }
   const row = state.cart.find(item => item.id === id);
   if (!row) return;
   row.qty += change;
@@ -148,15 +220,24 @@ function bindMainEvents() {
   if (checkout) checkout.addEventListener('click', openCheckout);
   const privacyRewards = document.getElementById('privacy-from-rewards');
   if (privacyRewards) privacyRewards.addEventListener('click', openPrivacy);
+  const promoForm = document.getElementById('promo-form');
+  if (promoForm) promoForm.addEventListener('submit', event => { event.preventDefault(); applyPromo(document.getElementById('promo-code').value); });
+  document.querySelectorAll('[data-remove-promo]').forEach(button => button.addEventListener('click', () => { state.promo = ''; persist(); render(); notify('Código removido', 'A promoção foi retirada do pedido.'); }));
+  document.querySelectorAll('input[name="service"]').forEach(radio => radio.addEventListener('change', () => { state.serviceMode = radio.value; persist(); render(); }));
 }
 function openAccount() {
   const customer = state.customer || { name: '', email: '' };
-  showModal(state.customer ? 'Sua conta de demonstração' : 'Entre para continuar', 'Clube Raízes', `<p>Este formulário simula um cadastro simples. Não use senha real nem informações sensíveis. Os dados ficam apenas neste navegador durante a demonstração.</p><form id="account-form" class="form-grid"><div class="field"><label for="customer-name">Como podemos chamar você?</label><input id="customer-name" name="name" autocomplete="name" required minlength="2" maxlength="70" value="${escapeHTML(customer.name)}" placeholder="Seu nome"></div><div class="field"><label for="customer-email">E-mail</label><input id="customer-email" type="email" name="email" autocomplete="email" required maxlength="120" value="${escapeHTML(customer.email)}" placeholder="voce@exemplo.com"><span class="field-hint">Usado neste protótipo para vincular seus pedidos ao perfil local.</span></div><label class="check-row"><input type="checkbox" name="marketing" ${state.consent.marketing ? 'checked' : ''}> Quero receber novidades e campanhas por e-mail. (opcional)</label><div class="form-error" id="account-error" role="alert">Confira o nome e informe um e-mail válido.</div><div class="modal-actions"><button type="submit" class="button button-primary">${state.customer ? 'Salvar dados' : 'Entrar na demonstração'}</button>${state.customer ? '<button type="button" class="button button-quiet" id="logout-button">Sair da conta</button>' : ''}</div></form>`);
+  showModal(state.customer ? 'Sua conta de demonstração' : 'Entre para continuar', 'Clube Raízes', `<p>Este formulário simula um cadastro simples. Não use senha real nem informações sensíveis. Os dados ficam apenas neste navegador durante a demonstração.</p><form id="account-form" class="form-grid" novalidate><div class="field"><label for="customer-name">Como podemos chamar você?</label><input id="customer-name" name="name" autocomplete="name" required minlength="2" maxlength="70" value="${escapeHTML(customer.name)}" placeholder="Seu nome"></div><div class="field"><label for="customer-email">E-mail</label><input id="customer-email" type="email" name="email" autocomplete="email" required maxlength="120" value="${escapeHTML(customer.email)}" placeholder="voce@exemplo.com"><span class="field-hint">Usado neste protótipo para vincular seus pedidos ao perfil local.</span></div><label class="check-row"><input type="checkbox" name="terms" ${state.customer ? 'checked' : ''}> Li e aceito os Termos de Uso e a Política de Privacidade (textos demonstrativos). (obrigatório)</label><label class="check-row"><input type="checkbox" name="marketing" ${state.consent.marketing ? 'checked' : ''}> Quero receber novidades e campanhas por e-mail. (opcional)</label><div class="form-error" id="account-error" role="alert"></div><div class="modal-actions"><button type="submit" class="button button-primary">${state.customer ? 'Salvar dados' : 'Entrar na demonstração'}</button>${state.customer ? '<button type="button" class="button button-quiet" id="logout-button">Sair da conta</button>' : ''}</div></form>`);
   document.getElementById('account-form').addEventListener('submit', event => {
     event.preventDefault();
     const form = event.currentTarget; const data = new FormData(form); const name = String(data.get('name') || '').trim(); const email = String(data.get('email') || '').trim();
-    if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { document.getElementById('account-error').classList.add('show'); return; }
-    state.customer = { name, email }; state.consent.marketing = data.get('marketing') === 'on'; state.consent.saved = true; persist(); closeModal(); render(); notify('Perfil salvo', `Olá, ${name.split(' ')[0]}! Você já pode concluir o pedido.`);
+    const errors = [];
+    if (name.length < 2) errors.push('Informe seu nome (mínimo de 2 letras).');
+    if (!EMAIL_RE.test(email)) errors.push('Informe um e-mail válido.');
+    if (data.get('terms') !== 'on') errors.push('Aceite os Termos de Uso e a Política de Privacidade para continuar.');
+    const errorBox = document.getElementById('account-error');
+    if (errors.length) { errorBox.textContent = errors.join(' '); errorBox.classList.add('show'); return; }
+    state.customer = { name, email, termsAcceptedAt: new Date().toISOString() }; state.consent.marketing = data.get('marketing') === 'on'; logConsent('Cadastro'); persist(); closeModal(); render(); notify('Perfil salvo', `Olá, ${name.split(' ')[0]}! Você já pode concluir o pedido.`);
   });
   const logout = document.getElementById('logout-button');
   if (logout) logout.addEventListener('click', () => { state.customer = null; persist(); closeModal(); render(); notify('Você saiu da conta', 'Seu histórico local de demonstração foi mantido.'); });
@@ -164,34 +245,62 @@ function openAccount() {
 function openCheckout() {
   if (!state.cart.length) { notify('Sua sacola está vazia', 'Adicione ao menos um produto antes de continuar.', 'error'); return; }
   if (!state.customer) { openAccount(); notify('Só mais uma etapa', 'Entre na demonstração para vincular seu pedido ao perfil.'); return; }
-  const total = cartSubtotal();
-  showModal('Revise e escolha como pagar', 'Finalização do pedido', `<div class="payment-box"><h3>Retirada em ${escapeHTML(units[state.unit].name)}</h3><p>Itens: ${escapeHTML(state.cart.map(row => `${row.qty}× ${productById(row.id).name}`).join(', '))}</p><div class="total-row grand"><span>Total a pagar</span><strong>${money(total)}</strong></div></div><form id="payment-form"><p>Selecione um método para simular o encaminhamento a um provedor externo. Nenhum dado financeiro será solicitado ou cobrado.</p><div class="payment-methods" role="group" aria-label="Método de pagamento"><button type="button" class="payment-method ${state.selectedPayment === 'pix' ? 'is-selected' : ''}" data-payment="pix">◇ Pix</button><button type="button" class="payment-method ${state.selectedPayment === 'card' ? 'is-selected' : ''}" data-payment="card">▤ Cartão</button></div><div class="privacy-footer-note">Ao confirmar, o sistema enviaria apenas o identificador do pedido e o valor ao serviço de pagamento. O retorno de aprovação ou recusa atualizaria o status. Esta etapa é simulada localmente.</div><div class="modal-actions"><button type="button" class="button button-primary" id="simulate-approve">Simular pagamento aprovado</button><button type="button" class="button button-quiet" id="simulate-decline">Simular recusa</button></div><div id="payment-response" aria-live="polite"></div></form>`, { wide: true });
+  paymentLock = false;
+  const total = cartTotal();
+  showModal('Revise e escolha como pagar', 'Finalização do pedido', `<div class="payment-box"><h3>${escapeHTML(serviceLabel())} em ${escapeHTML(units[state.unit].name)}</h3><p>Itens: ${escapeHTML(state.cart.map(row => `${row.qty}× ${productById(row.id).name}`).join(', '))}</p><div class="total-row grand"><span>Total a pagar</span><strong>${money(total)}</strong></div></div><form id="payment-form"><p>Selecione um método para simular o encaminhamento a um provedor externo. Nenhum dado financeiro será solicitado ou cobrado.</p><div class="payment-methods" role="group" aria-label="Método de pagamento"><button type="button" class="payment-method ${state.selectedPayment === 'pix' ? 'is-selected' : ''}" data-payment="pix">◇ Pix</button><button type="button" class="payment-method ${state.selectedPayment === 'card' ? 'is-selected' : ''}" data-payment="card">▤ Cartão</button></div><div class="privacy-footer-note">Ao confirmar, o sistema enviaria apenas o identificador do pedido e o valor ao serviço de pagamento. O retorno de aprovação ou recusa atualizaria o status. Esta etapa é simulada localmente.</div><div class="modal-actions"><button type="button" class="button button-primary" id="simulate-approve">Simular pagamento aprovado</button><button type="button" class="button button-quiet" id="simulate-decline">Simular recusa</button><button type="button" class="button button-quiet" id="simulate-noresponse">Simular sem resposta</button></div><div id="payment-response" aria-live="polite"></div></form>`, { wide: true });
   document.querySelectorAll('[data-payment]').forEach(button => button.addEventListener('click', () => { state.selectedPayment = button.dataset.payment; document.querySelectorAll('[data-payment]').forEach(option => option.classList.toggle('is-selected', option === button)); persist(); }));
   document.getElementById('simulate-decline').addEventListener('click', () => {
     document.getElementById('payment-response').innerHTML = `<div class="payment-result failure"><strong>Pagamento não aprovado (simulação)</strong><br>Nenhuma cobrança foi realizada. Sua sacola continua disponível para tentar novamente ou escolher outro método.</div>`;
     notify('Pagamento não aprovado', 'O pedido não foi criado; a sacola foi preservada.', 'error');
   });
   document.getElementById('simulate-approve').addEventListener('click', completeOrder);
+  document.getElementById('simulate-noresponse').addEventListener('click', startNoResponse);
+  if (state.pendingPayment) lockForPending();
+}
+function lockForPending() {
+  ['simulate-approve', 'simulate-decline', 'simulate-noresponse'].forEach(id => { const button = document.getElementById(id); if (button) button.disabled = true; });
+  document.querySelectorAll('[data-payment]').forEach(button => button.disabled = true);
+  const ref = state.pendingPayment ? state.pendingPayment.ref : '';
+  document.getElementById('payment-response').innerHTML = `<div class="payment-result pending"><strong>Resultado inconclusivo (simulação)</strong><br>Não recebemos resposta do provedor para a referência <span class="order-code">${escapeHTML(ref)}</span>. Para evitar cobrança em duplicidade, não é possível pagar de novo: consulte o status do pagamento.</div><div class="modal-actions"><button type="button" class="button button-primary" id="check-payment">Consultar status do pagamento</button><button type="button" class="button button-quiet" id="close-payment">Fechar</button></div>`;
+  document.getElementById('check-payment').addEventListener('click', checkPending);
+  document.getElementById('close-payment').addEventListener('click', () => { closeModal(); render(); });
+}
+function startNoResponse() {
+  if (state.pendingPayment || !state.cart.length) return;
+  state.pendingPayment = { ref: String(Date.now()).slice(-6), key: `idem-${Date.now().toString(36)}`, at: new Date().toISOString() };
+  persist(); lockForPending();
+  notify('Pagamento sem resposta', 'Nenhuma nova cobrança será iniciada.', 'error');
+}
+function checkPending() {
+  if (!state.pendingPayment) return;
+  const button = document.getElementById('check-payment'); if (button) button.disabled = true;
+  completeOrder();
 }
 function completeOrder() {
-  const total = cartSubtotal();
-  if (!total || !state.cart.length) { closeModal(); notify('Não foi possível concluir', 'A sacola está vazia. Revise o pedido.', 'error'); return; }
+  if (paymentLock) return;
+  const total = cartTotal();
+  if (!state.cart.length || !total) { closeModal(); notify('Não foi possível concluir', 'A sacola está vazia. Revise o pedido.', 'error'); return; }
+  paymentLock = true;
+  state.orderSeq += 1;
+  const discount = promoDiscount();
   const order = {
     id: String(Date.now()).slice(-7), unit: state.unit, unitName: units[state.unit].name,
     date: new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
     payment: state.selectedPayment, paymentLabel: ({ pix: 'Pix simulado', card: 'Cartão simulado' })[state.selectedPayment],
-    status: 'Em preparo', total,
+    status: statuses[0], total, discount, promo: discount ? state.promo : '', serviceLabel: serviceLabel(), ticket: `A${state.orderSeq}`,
     items: state.cart.map(row => ({ id: row.id, name: productById(row.id).name, qty: row.qty }))
   };
   state.orders.unshift(order);
   state.points += Math.floor(total);
-  state.cart = []; persist();
-  document.getElementById('payment-response').innerHTML = `<div class="payment-result"><strong>Retorno positivo do provedor externo (simulação)</strong><br>Referência <span class="order-code">${escapeHTML(order.id)}</span>. O pedido foi atualizado para “${escapeHTML(order.status)}”.</div><div class="modal-actions"><button type="button" class="button button-primary" id="view-new-order">Acompanhar pedido</button><button type="button" class="button button-quiet" id="close-payment">Fechar</button></div>`;
-  document.getElementById('simulate-approve').disabled = true;
-  document.getElementById('simulate-decline').disabled = true;
+  state.cart = []; state.promo = ''; state.pendingPayment = null; persist();
+  const response = document.getElementById('payment-response');
+  if (response) {
+    response.innerHTML = `<div class="payment-result"><strong>Retorno positivo do provedor externo (simulação)</strong><br>Referência <span class="order-code">${escapeHTML(order.id)}</span> · senha <span class="order-code">${escapeHTML(order.ticket)}</span>. O pedido foi atualizado para “${escapeHTML(order.status)}”.</div><div class="modal-actions"><button type="button" class="button button-primary" id="view-new-order">Acompanhar pedido</button><button type="button" class="button button-quiet" id="close-payment">Fechar</button></div>`;
+    document.getElementById('view-new-order').addEventListener('click', () => { closeModal(); setView('orders'); notify('Pedido criado', `Pedido #${order.id} registrado nesta demonstração.`); });
+    document.getElementById('close-payment').addEventListener('click', () => { closeModal(); render(); notify('Pedido criado', `Pedido #${order.id} está ${order.status.toLowerCase()}.`); });
+  }
+  ['simulate-approve', 'simulate-decline', 'simulate-noresponse'].forEach(id => { const button = document.getElementById(id); if (button) button.disabled = true; });
   document.querySelectorAll('[data-payment]').forEach(button => button.disabled = true);
-  document.getElementById('view-new-order').addEventListener('click', () => { closeModal(); setView('orders'); notify('Pedido criado', `Pedido #${order.id} registrado nesta demonstração.`); });
-  document.getElementById('close-payment').addEventListener('click', () => { closeModal(); render(); notify('Pedido criado', `Pedido #${order.id} está ${order.status.toLowerCase()}.`); });
   render();
 }
 function advanceOrder(id) {
@@ -208,13 +317,14 @@ function redeemReward(id) {
   state.points -= reward.points; state.redeemed.push(id); persist(); render(); notify('Benefício resgatado', reward.title);
 }
 function openPrivacy() {
-  showModal('Você escolhe seus dados', 'Privacidade e LGPD', `<p>Este protótipo demonstra escolhas separadas. O armazenamento é local e fictício; não há integração com servidor ou compartilhamento real.</p><form id="privacy-form"><div class="privacy-option locked"><div><strong>Dados necessários</strong><p>Preferências básicas e dados mínimos para manter a demonstração funcionando. Sempre ativos neste protótipo.</p></div><input type="checkbox" checked disabled aria-label="Dados necessários sempre ativos"></div><div class="privacy-option"><div><strong>Métricas de uso</strong><p>Ajudariam a entender o uso das telas. Não são necessárias para pedir.</p></div><input type="checkbox" name="analytics" ${state.consent.analytics ? 'checked' : ''} aria-label="Permitir métricas de uso"></div><div class="privacy-option"><div><strong>Campanhas e novidades</strong><p>Permitem receber comunicações promocionais. Consentimento opcional.</p></div><input type="checkbox" name="marketing" ${state.consent.marketing ? 'checked' : ''} aria-label="Permitir campanhas e novidades"></div><div class="privacy-footer-note">Você pode alterar esta escolha depois. Em uma versão real, também seriam implementados canal para exercer direitos, política de retenção, controles de acesso e registro de consentimento no backend.</div><div class="modal-actions"><button type="submit" class="button button-primary">Salvar preferências</button><button type="button" class="button button-quiet" id="essential-only">Somente necessários</button></div></form>`);
+  showModal('Você escolhe seus dados', 'Privacidade e LGPD', `<p>Este protótipo demonstra escolhas separadas. O armazenamento é local e fictício; não há integração com servidor ou compartilhamento real.</p><form id="privacy-form"><div class="privacy-option locked"><div><strong>Dados necessários</strong><p>Preferências básicas e dados mínimos para manter a demonstração funcionando. Sempre ativos neste protótipo.</p></div><input type="checkbox" checked disabled aria-label="Dados necessários sempre ativos"></div><div class="privacy-option"><div><strong>Métricas de uso</strong><p>Ajudariam a entender o uso das telas. Não são necessárias para pedir.</p></div><input type="checkbox" name="analytics" ${state.consent.analytics ? 'checked' : ''} aria-label="Permitir métricas de uso"></div><div class="privacy-option"><div><strong>Campanhas e novidades</strong><p>Permitem receber comunicações promocionais. Consentimento opcional.</p></div><input type="checkbox" name="marketing" ${state.consent.marketing ? 'checked' : ''} aria-label="Permitir campanhas e novidades"></div><div class="privacy-footer-note">Você pode alterar esta escolha depois. Em uma versão real, também seriam implementados canal para exercer direitos, política de retenção, controles de acesso e registro de consentimento no backend.</div><div class="modal-actions"><button type="submit" class="button button-primary">Salvar preferências</button><button type="button" class="button button-quiet" id="essential-only">Somente necessários</button></div></form>${rightsBlock()}`);
+  bindRights();
   document.getElementById('privacy-form').addEventListener('submit', event => {
-    event.preventDefault(); const data = new FormData(event.currentTarget); state.consent.analytics = data.get('analytics') === 'on'; state.consent.marketing = data.get('marketing') === 'on'; state.consent.saved = true; persist(); closeModal(); render(); notify('Preferências salvas', 'Suas escolhas foram atualizadas neste navegador.');
+    event.preventDefault(); const data = new FormData(event.currentTarget); state.consent.analytics = data.get('analytics') === 'on'; state.consent.marketing = data.get('marketing') === 'on'; state.consent.saved = true; logConsent('Central de privacidade'); persist(); closeModal(); render(); notify('Preferências salvas', 'Suas escolhas foram atualizadas neste navegador.');
   });
-  document.getElementById('essential-only').addEventListener('click', () => { state.consent.analytics = false; state.consent.marketing = false; state.consent.saved = true; persist(); closeModal(); render(); notify('Preferências atualizadas', 'Somente os dados necessários permanecem ativos.'); });
+  document.getElementById('essential-only').addEventListener('click', () => { state.consent.analytics = false; state.consent.marketing = false; state.consent.saved = true; logConsent('Central de privacidade'); persist(); closeModal(); render(); notify('Preferências atualizadas', 'Somente os dados necessários permanecem ativos.'); });
 }
-function acceptEssential() { state.consent.analytics = false; state.consent.marketing = false; state.consent.saved = true; persist(); render(); notify('Preferências salvas', 'A demonstração seguirá somente com o necessário.'); }
+function acceptEssential() { state.consent.analytics = false; state.consent.marketing = false; state.consent.saved = true; logConsent('Aviso de privacidade'); persist(); render(); notify('Preferências salvas', 'A demonstração seguirá somente com o necessário.'); }
 
 // Global events
 
@@ -227,7 +337,7 @@ document.getElementById('unit-select').addEventListener('change', event => {
   state.category = 'Todos'; state.search = ''; persist(); render();
   if (oldUnit !== state.unit) notify('Unidade alterada', `${units[state.unit].name}: ${units[state.unit].kitchen.toLowerCase()}.`);
 });
-document.querySelectorAll('[data-channel]').forEach(button => button.addEventListener('click', () => { state.channel = button.dataset.channel; persist(); updateHeader(); notify('Canal alterado', ({ web: 'Experiência Web responsiva.', app: 'Visão compacta para experiência App.', totem: 'Controles ampliados para autoatendimento.' })[state.channel]); }));
+document.querySelectorAll('[data-channel]').forEach(button => button.addEventListener('click', () => { state.channel = button.dataset.channel; persist(); updateHeader(); resetIdleTimer(); notify('Canal alterado', ({ web: 'Experiência Web responsiva.', app: 'Visão compacta para experiência App.', totem: 'Controles ampliados para autoatendimento.' })[state.channel]); }));
 document.getElementById('account-button').addEventListener('click', openAccount);
 document.getElementById('jump-cart').addEventListener('click', () => {
   if (state.view !== 'menu') setView('menu');
@@ -236,6 +346,19 @@ document.getElementById('jump-cart').addEventListener('click', () => {
 document.getElementById('privacy-footer').addEventListener('click', openPrivacy);
 document.getElementById('customize-consent').addEventListener('click', openPrivacy);
 document.getElementById('accept-essential').addEventListener('click', acceptEssential);
-document.addEventListener('keydown', event => { if (event.key === 'Escape' && document.getElementById('modal-root').innerHTML) closeModal(); });
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.getElementById('modal-root').innerHTML) closeModal();
+  if (event.key === 'Tab') {
+    const modal = document.querySelector('#modal-root .modal');
+    if (!modal) return;
+    const focusable = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select, a[href], [tabindex="0"]'));
+    if (!focusable.length) return;
+    const first = focusable[0]; const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+});
+['click', 'keydown', 'touchstart', 'pointerdown', 'input'].forEach(name => document.addEventListener(name, resetIdleTimer, true));
 
 render();
+resetIdleTimer();

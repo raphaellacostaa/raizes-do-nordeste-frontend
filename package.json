@@ -1,0 +1,8 @@
+{
+  "name": "raizes-do-nordeste-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Protótipo acadêmico – interface multicanal Raízes do Nordeste",
+  "scripts": { "test": "node tests/run-tests.js" },
+  "devDependencies": { "jsdom": "^26.0.0" }
+}
